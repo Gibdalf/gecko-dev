@@ -190,7 +190,6 @@ dom/payments/**
 dom/performance/**
 dom/permission/**
 dom/plugins/test/unit/**
-dom/promise/**
 dom/push/**
 dom/quota/**
 dom/security/test/cors/**

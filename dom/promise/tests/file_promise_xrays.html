@@ -11,7 +11,7 @@
     try {
       // Neuter everything we can think of on Promise.
       for (var obj of [Promise, Promise.prototype]) {
-        propNames = Object.getOwnPropertyNames(obj);
+        let propNames = Object.getOwnPropertyNames(obj);
         propNames = propNames.concat(Object.getOwnPropertySymbols(obj));
         for (var propName of propNames) {
           if ((propName == "prototype" ||
