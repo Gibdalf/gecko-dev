@@ -1,0 +1,501 @@
+From 675beaf0b0712ecfd27dfca6d3f3eed58691cc71 Mon Sep 17 00:00:00 2001
+From: Alec Gibson <violinmonkey42@gmail.com>
+Date: Thu, 7 Mar 2019 17:43:05 -0500
+Subject: [PATCH] Bug 1532935 - Enable ESLint for dom/promise (manual changes).
+ r?Standard8
+
+---
+ .eslintignore                                 |  1 -
+ .../tests/file_promise_argument_tests.js      |  3 ++
+ .../tests/file_promise_retval_tests.js        |  3 ++
+ dom/promise/tests/file_promise_xrays.html     |  2 +-
+ .../tests/promise_uncatchable_exception.js    |  2 +
+ dom/promise/tests/test_on_new_promise.html    |  1 +
+ dom/promise/tests/test_promise.html           | 49 ++++++++++++-------
+ .../test_promise_and_timeout_ordering.html    |  1 +
+ ..._promise_and_timeout_ordering_workers.html |  1 +
+ .../tests/test_promise_callback_retval.html   |  2 +
+ dom/promise/tests/test_promise_retval.html    |  2 +-
+ dom/promise/tests/test_promise_utils.html     | 16 ++----
+ dom/promise/tests/test_promise_xrays.html     |  4 +-
+ dom/promise/tests/test_species_getter.html    |  2 +
+ .../test_thenable_vs_promise_ordering.html    |  2 +
+ .../tests/test_webassembly_compile.html       |  8 +--
+ .../tests/test_webassembly_compile_worker.js  |  6 +--
+ .../tests/unit/test_monitor_uncaught.js       |  5 ++
+ 18 files changed, 70 insertions(+), 40 deletions(-)
+
+diff --git a/.eslintignore b/.eslintignore
+index 49121341f82e0..ef6c5091a04b4 100644
+--- a/.eslintignore
++++ b/.eslintignore
+@@ -190,7 +190,6 @@ dom/payments/**
+ dom/performance/**
+ dom/permission/**
+ dom/plugins/test/unit/**
+-dom/promise/**
+ dom/push/**
+ dom/quota/**
+ dom/security/test/cors/**
+diff --git a/dom/promise/tests/file_promise_argument_tests.js b/dom/promise/tests/file_promise_argument_tests.js
+index e0659c7cf986e..ac58c1e5a0c54 100644
+--- a/dom/promise/tests/file_promise_argument_tests.js
++++ b/dom/promise/tests/file_promise_argument_tests.js
+@@ -14,6 +14,9 @@
+  * 4) A subframe (frames[0]) which can be used as a second global for creating
+  *    promises.
+  */
++
++/* global verifyPromiseGlobal, getPromise, isXrayArgumentTest */
++
+ var label = "parent";
+ 
+ function passBasicPromise() {
+diff --git a/dom/promise/tests/file_promise_retval_tests.js b/dom/promise/tests/file_promise_retval_tests.js
+index 35a4d8eaa0830..e0438b9bed666 100644
+--- a/dom/promise/tests/file_promise_retval_tests.js
++++ b/dom/promise/tests/file_promise_retval_tests.js
+@@ -11,6 +11,9 @@
+  * 3) A subframe (frames[0]) which can be used as a second global for creating
+  *    promises.
+  */
++
++/* global verifyPromiseGlobal, expectedExceptionGlobal */
++
+ var label = "parent";
+ 
+ function testThrownException(global) {
+diff --git a/dom/promise/tests/file_promise_xrays.html b/dom/promise/tests/file_promise_xrays.html
+index 0ba82a1f38c7e..0f60d39f19fed 100644
+--- a/dom/promise/tests/file_promise_xrays.html
++++ b/dom/promise/tests/file_promise_xrays.html
+@@ -11,7 +11,7 @@
+     try {
+       // Neuter everything we can think of on Promise.
+       for (var obj of [Promise, Promise.prototype]) {
+-        propNames = Object.getOwnPropertyNames(obj);
++        let propNames = Object.getOwnPropertyNames(obj);
+         propNames = propNames.concat(Object.getOwnPropertySymbols(obj));
+         for (var propName of propNames) {
+           if ((propName == "prototype" ||
+diff --git a/dom/promise/tests/promise_uncatchable_exception.js b/dom/promise/tests/promise_uncatchable_exception.js
+index d062e21af3e14..6362a5fa54100 100644
+--- a/dom/promise/tests/promise_uncatchable_exception.js
++++ b/dom/promise/tests/promise_uncatchable_exception.js
+@@ -1,3 +1,5 @@
++/* global TestFunctions */
++
+ postMessage("Done", "*");
+ 
+ var p = new Promise(function(resolve, reject) {
+diff --git a/dom/promise/tests/test_on_new_promise.html b/dom/promise/tests/test_on_new_promise.html
+index bcacc03568804..c88fb5ecfd446 100644
+--- a/dom/promise/tests/test_on_new_promise.html
++++ b/dom/promise/tests/test_on_new_promise.html
+@@ -35,6 +35,7 @@
+   dbg.onNewPromise = function(wp) { wrappedPromise = wp; };
+ 
+   var promise = new Promise(function() {});
++  // eslint-disable-next-line no-debugger
+   debugger;
+   ok(wrappedPromise);
+   is(wrappedPromise.unsafeDereference(), promise);
+diff --git a/dom/promise/tests/test_promise.html b/dom/promise/tests/test_promise.html
+index 7dfbf68ff2c60..27af8561b87c6 100644
+--- a/dom/promise/tests/test_promise.html
++++ b/dom/promise/tests/test_promise.html
+@@ -24,7 +24,8 @@
+     ok(reject, "Promise.reject exists");
+ 
+     resolve(42);
+-  }).then(function(what) {
++  });
++  promise.then(function(what) {
+     ok(true, "Then - resolveCb has been called");
+     is(what, 42, "ResolveCb received 42");
+     runTest();
+@@ -40,7 +41,8 @@
+     ok(reject, "Promise.reject exists");
+ 
+     resolve();
+-  }).then(function(what) {
++  });
++  promise.then(function(what) {
+     ok(true, "Then - resolveCb has been called");
+     is(what, undefined, "ResolveCb received undefined");
+     runTest();
+@@ -53,7 +55,8 @@
+ function promiseReject() {
+   var promise = new Promise(function(resolve, reject) {
+     reject(42);
+-  }).then(function(what) {
++  });
++  promise.then(function(what) {
+     ok(false, "Then - resolveCb has been called");
+     runTest();
+   }, function(what) {
+@@ -66,8 +69,10 @@
+ function promiseRejectNoHandler() {
+   // This test only checks that the code that reports unhandled errors in the
+   // Promises implementation does not crash or leak.
++
++  // eslint-disable-next-line no-unused-vars
+   var promise = new Promise(function(res, rej) {
+-    noSuchMethod();
++    throw new ReferenceError("replaced undefined function");
+   });
+   runTest();
+ }
+@@ -75,7 +80,8 @@
+ function promiseRejectNoArg() {
+   var promise = new Promise(function(resolve, reject) {
+     reject();
+-  }).then(function(what) {
++  });
++  promise.then(function(what) {
+     ok(false, "Then - resolveCb has been called");
+     runTest();
+   }, function(what) {
+@@ -88,7 +94,8 @@
+ function promiseException() {
+   var promise = new Promise(function(resolve, reject) {
+     throw 42;
+-  }).then(function(what) {
++  });
++  promise.then(function(what) {
+     ok(false, "Then - resolveCb has been called");
+     runTest();
+   }, function(what) {
+@@ -102,7 +109,8 @@
+   var resolve;
+   var promise = new Promise(function(r1, r2) {
+     resolve = r1;
+-  }).then(function(what) {
++  });
++  promise.then(function(what) {
+     ok(true, "Then - promise is still alive");
+     runTest();
+   });
+@@ -436,9 +444,9 @@
+ 
+ function promiseNestedPromise() {
+   new Promise(function(resolve, reject) {
+-    resolve(new Promise(function(resolve, reject) {
++    resolve(new Promise(function(res, rej) {
+       ok(true, "Nested promise is executed");
+-      resolve(42);
++      res(42);
+     }));
+   }).then(function(value) {
+     is(value, 42, "Nested promise is executed and then == 42");
+@@ -448,9 +456,9 @@
+ 
+ function promiseNestedNestedPromise() {
+   new Promise(function(resolve, reject) {
+-    resolve(new Promise(function(resolve, reject) {
++    resolve(new Promise(function(res, rej) {
+       ok(true, "Nested promise is executed");
+-      resolve(42);
++      res(42);
+     }).then(function(what) { return what + 1; }));
+   }).then(function(value) {
+     is(value, 43, "Nested promise is executed and then == 43");
+@@ -475,11 +483,11 @@
+ 
+ function promiseLoop() {
+   new Promise(function(resolve, reject) {
+-    resolve(new Promise(function(r1, r2) {
++    resolve(new Promise(function(res, rej) {
+       ok(true, "Nested promise is executed");
+-      r1(new Promise(function(r1, r2) {
++      res(new Promise(function(resInner, rejInner) {
+         ok(true, "Nested nested promise is executed");
+-        r1(42);
++        resInner(42);
+       }));
+     }));
+   }).then(function(value) {
+@@ -491,7 +499,8 @@
+ }
+ 
+ function promiseStaticReject() {
+-  var promise = Promise.reject(42).then(function(what) {
++  var promise = Promise.reject(42);
++  promise.then(function(what) {
+     ok(false, "This should not be called");
+   }, function(what) {
+     is(what, 42, "Value == 42");
+@@ -500,7 +509,8 @@
+ }
+ 
+ function promiseStaticResolve() {
+-  var promise = Promise.resolve(42).then(function(what) {
++  var promise = Promise.resolve(42);
++  promise.then(function(what) {
+     is(what, 42, "Value == 42");
+     runTest();
+   }, function() {
+@@ -514,7 +524,8 @@
+     r(42);
+   }, function() {
+     ok(false, "This should not be called");
+-  })).then(function(what) {
++  }));
++  promise.then(function(what) {
+     is(what, 42, "Value == 42");
+     runTest();
+   }, function() {
+@@ -554,6 +565,8 @@
+ function promiseThenableThrowsBeforeCallback() {
+   var thenable = { then(resolve) {
+     throw new TypeError("Hi there");
++
++    // eslint-disable-next-line no-unreachable
+     resolve(5);
+   }};
+ 
+@@ -630,6 +643,7 @@
+ }
+ 
+ function promiseStrictExecutorThisArg() {
++  // eslint-disable-next-line no-unused-vars
+   var promise = new Promise(function(resolve, reject) {
+     "use strict";
+     ok(this === undefined, "thisArg should be undefined.");
+@@ -723,6 +737,7 @@
+   Promise.resolve().then(function next() {
+     k--;
+     if (k > 0) return Promise.resolve().then(next);
++    return true;
+   }).then(function() {
+     ok(true, "Resolution of a chain of thenables should not be synchronous.");
+     runTest();
+diff --git a/dom/promise/tests/test_promise_and_timeout_ordering.html b/dom/promise/tests/test_promise_and_timeout_ordering.html
+index 74f7c8ffdfdf3..e92e928e75ea2 100644
+--- a/dom/promise/tests/test_promise_and_timeout_ordering.html
++++ b/dom/promise/tests/test_promise_and_timeout_ordering.html
+@@ -5,6 +5,7 @@
+ <script src="/resources/testharnessreport.js"></script>
+ <div id="log"></div>
+ <script>
++/* global async_test, assert_equals */
+ var t = async_test("Promise callbacks should run immediately after the setTimeout handler that enqueues them");
+ var origPostMessage = window.postMessage;
+ window.postMessage = function(msg) { origPostMessage.call(window, msg, "*"); };
+diff --git a/dom/promise/tests/test_promise_and_timeout_ordering_workers.html b/dom/promise/tests/test_promise_and_timeout_ordering_workers.html
+index 122a794db645c..85fd4c0019fa4 100644
+--- a/dom/promise/tests/test_promise_and_timeout_ordering_workers.html
++++ b/dom/promise/tests/test_promise_and_timeout_ordering_workers.html
+@@ -5,6 +5,7 @@
+ <script src="/resources/testharnessreport.js"></script>
+ <div id="log"></div>
+ <script>
++/* global async_test, assert_equals */
+ var t = async_test("Promise callbacks in workers should run immediately after the setTimeout handler that enqueues them");
+ var w = new Worker("file_promise_and_timeout_ordering.js");
+ w.onmessage = t.step_func_done(function(e) {
+diff --git a/dom/promise/tests/test_promise_callback_retval.html b/dom/promise/tests/test_promise_callback_retval.html
+index e2c79f0e3f6b2..34188f06058cc 100644
+--- a/dom/promise/tests/test_promise_callback_retval.html
++++ b/dom/promise/tests/test_promise_callback_retval.html
+@@ -10,6 +10,8 @@
+   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css"/>
+   <script src="file_promise_argument_tests.js"></script>
+   <script type="application/javascript">
++  /* global TestFunctions */
++
+   /** Test for Bug 1323324 **/
+   SimpleTest.waitForExplicitFinish();
+ 
+diff --git a/dom/promise/tests/test_promise_retval.html b/dom/promise/tests/test_promise_retval.html
+index 8e248fc70c308..28f6dc7dba0a3 100644
+--- a/dom/promise/tests/test_promise_retval.html
++++ b/dom/promise/tests/test_promise_retval.html
+@@ -34,7 +34,7 @@
+     frames[0].label = "child";
+     SpecialPowers.pushPrefEnv({set: [["dom.expose_test_interfaces", true]]},
+                               runPromiseRetvalTests.bind(undefined,
+-							 SimpleTest.finish));
++                                                         SimpleTest.finish));
+   });
+   </script>
+ </head>
+diff --git a/dom/promise/tests/test_promise_utils.html b/dom/promise/tests/test_promise_utils.html
+index 02371bc87bbbc..aac52c995d0a4 100644
+--- a/dom/promise/tests/test_promise_utils.html
++++ b/dom/promise/tests/test_promise_utils.html
+@@ -136,7 +136,9 @@
+ }
+ 
+ function promiseAllCastError() {
+-  var p = Promise.all([Promise.resolve(2), { then() { foo(); } }]);
++  var p = Promise.all([Promise.resolve(2), { then() {
++    throw new ReferenceError("placeholder for nonexistent function call");
++  } }]);
+   ok(p instanceof Promise, "Should cast to a Promise.");
+   p.then(function(v) {
+     ok(false, "promiseAllCastError: should've rejected.");
+@@ -152,7 +154,7 @@
+   var p = Promise.all([1, new Date(), Promise.resolve("firefox")]);
+   p.then(function(v) {
+     var count = 0;
+-    for (key in v) {
++    for (let key in v) {
+       ++count;
+       ok(v[key] === 1 || v[key] instanceof Date || v[key] === "firefox",
+          "Enumerated properties don't match.");
+@@ -193,14 +195,6 @@
+ }
+ 
+ function promiseRacePromiseArray() {
+-  function timeoutPromise(n) {
+-    return new Promise(function(resolve) {
+-      setTimeout(function() {
+-        resolve(n);
+-      }, n);
+-    });
+-  }
+-
+   var arr = [
+     new Promise(function(resolve) {
+       resolve("first");
+@@ -264,7 +258,7 @@
+ function promiseRaceThrow() {
+   var p = Promise.race([
+     new Promise(function(resolve) {
+-      nonExistent();
++      throw new ReferenceError("placeholder for nonexistent function call");
+     }),
+     new Promise(function(resolve) {
+       setTimeout(resolve, 0);
+diff --git a/dom/promise/tests/test_promise_xrays.html b/dom/promise/tests/test_promise_xrays.html
+index 5c840c106af4b..e99c53b8756b7 100644
+--- a/dom/promise/tests/test_promise_xrays.html
++++ b/dom/promise/tests/test_promise_xrays.html
+@@ -82,7 +82,7 @@
+ 
+ function testRace2() {
+   var p = win.Promise.race(
+-    new Array(win.Promise.resolve(1), win.Promise.resolve(2)));
++    [win.Promise.resolve(1), win.Promise.resolve(2)]);
+   p.then(
+     function(arg) {
+       ok(arg == 1 || arg == 2,
+@@ -140,7 +140,7 @@
+ 
+ function testAll2() {
+   var p = win.Promise.all(
+-    new Array(win.Promise.resolve(1), win.Promise.resolve(2)));
++    [win.Promise.resolve(1), win.Promise.resolve(2)]);
+   p.then(
+     function(arg) {
+       ok(arg instanceof win.Array, "Should get an Array from Promise.all (2)");
+diff --git a/dom/promise/tests/test_species_getter.html b/dom/promise/tests/test_species_getter.html
+index b58a587905e01..23cb7d8ae00d5 100644
+--- a/dom/promise/tests/test_species_getter.html
++++ b/dom/promise/tests/test_species_getter.html
+@@ -6,6 +6,8 @@
+ <div id="log"></div>
+ <script>
+ test(function() {
++  /* global test, assert_not_equals, assert_equals */
++
+   var desc = Object.getOwnPropertyDescriptor(Promise, Symbol.species);
+   assert_not_equals(desc, undefined, "Should have a property");
+ 
+diff --git a/dom/promise/tests/test_thenable_vs_promise_ordering.html b/dom/promise/tests/test_thenable_vs_promise_ordering.html
+index 9264a98ebb863..a537490b16726 100644
+--- a/dom/promise/tests/test_thenable_vs_promise_ordering.html
++++ b/dom/promise/tests/test_thenable_vs_promise_ordering.html
+@@ -5,6 +5,8 @@
+ <script src="/resources/testharnessreport.js"></script>
+ <div id="log"></div>
+ <script>
++/* global async_test, assert_true, assert_equals */
++
+ var t = async_test("A promise resolved first (with a thenable) should trigger its callbacks before a promise resolved second (with a promise).");
+ t.step(function() {
+   var customThenCalled = false;
+diff --git a/dom/promise/tests/test_webassembly_compile.html b/dom/promise/tests/test_webassembly_compile.html
+index f5931f2102951..921b12da953c5 100644
+--- a/dom/promise/tests/test_webassembly_compile.html
++++ b/dom/promise/tests/test_webassembly_compile.html
+@@ -79,8 +79,8 @@
+ 
+   Promise.all(arr).then(ms => {
+     ok(ms.length === N, "got the right number");
+-    for (var i = 0; i < N; i++)
+-      checkSampleModule(ms[i]);
++    for (var j = 0; j < N; j++)
++      checkSampleModule(ms[j]);
+     runTest();
+   }).catch(
+     err => { ok(false, String(err)); runTest(); }
+@@ -232,8 +232,8 @@
+ 
+   Promise.all(arr).then(ms => {
+     ok(ms.length === N, "got the right number");
+-    for (var i = 0; i < N; i++)
+-      checkSampleModule(ms[i]);
++    for (var j = 0; j < N; j++)
++      checkSampleModule(ms[j]);
+     runTest();
+   }).catch(
+     err => { ok(false, String(err)); runTest(); }
+diff --git a/dom/promise/tests/test_webassembly_compile_worker.js b/dom/promise/tests/test_webassembly_compile_worker.js
+index 2864110e87e6d..bf28606aaea73 100644
+--- a/dom/promise/tests/test_webassembly_compile_worker.js
++++ b/dom/promise/tests/test_webassembly_compile_worker.js
+@@ -25,15 +25,15 @@ onmessage = e => {
+   WebAssembly.compile(e.data)
+   .then(m => checkSampleModule(m))
+   .then(() => WebAssembly.instantiate(e.data))
+-  .then(({module, instance}) => { checkSampleModule(module), checkSampleInstance(instance); })
++  .then(({module, instance}) => function() { checkSampleModule(module); checkSampleInstance(instance); })
+   .then(() => WebAssembly.compileStreaming(new Response(e.data, initObj)))
+   .then(m => checkSampleModule(m))
+   .then(() => WebAssembly.instantiateStreaming(new Response(e.data, initObj)))
+-  .then(({module, instance}) => { checkSampleModule(module), checkSampleInstance(instance); })
++  .then(({module, instance}) => function() { checkSampleModule(module); checkSampleInstance(instance); })
+   .then(() => WebAssembly.compileStreaming(fetch(sampleURL)))
+   .then(m => checkSampleModule(m))
+   .then(() => WebAssembly.instantiateStreaming(fetch(sampleURL)))
+-  .then(({module, instance}) => { checkSampleModule(module), checkSampleInstance(instance); })
++  .then(({module, instance}) => function() { checkSampleModule(module); checkSampleInstance(instance); })
+   .then(() => postMessage("ok"))
+   .catch(err => postMessage("fail: " + err));
+ };
+diff --git a/dom/promise/tests/unit/test_monitor_uncaught.js b/dom/promise/tests/unit/test_monitor_uncaught.js
+index 44e9287a673ae..24b9aa68af6aa 100644
+--- a/dom/promise/tests/unit/test_monitor_uncaught.js
++++ b/dom/promise/tests/unit/test_monitor_uncaught.js
+@@ -84,9 +84,11 @@ add_task(async function test_observe_uncaught() {
+   };
+ 
+   let resolveLater = function(delay = 20) {
++    // eslint-disable-next-line mozilla/no-arbitrary-setTimeout
+     return new Promise((resolve, reject) => setTimeout(resolve, delay));
+   };
+   let rejectLater = function(delay = 20) {
++    // eslint-disable-next-line mozilla/no-arbitrary-setTimeout
+     return new Promise((resolve, reject) => setTimeout(reject, delay));
+   };
+   let makeSamples = function* () {
+@@ -119,6 +121,8 @@ add_task(async function test_observe_uncaught() {
+ 
+     // Reject a promise now, consume it later.
+     let p = Promise.reject("Reject now, consume later");
++
++    // eslint-disable-next-line mozilla/no-arbitrary-setTimeout
+     setTimeout(() => p.catch(() => {
+       info("Consumed promise");
+     }), 200);
+@@ -261,6 +265,7 @@ add_task(async function test_uninstall_observer() {
+   let wait = new Observer();
+   Promise.reject("I am another uncaught rejection.");
+   await wait.blocker;
++  // eslint-disable-next-line mozilla/no-arbitrary-setTimeout
+   await new Promise(resolve => setTimeout(resolve, 100));
+   // Normally, `deactivate` should not be notified of the uncaught rejection.
+   wait.active = false;
+
